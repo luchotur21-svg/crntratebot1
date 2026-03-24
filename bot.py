@@ -10,7 +10,7 @@ from telegram.ext import (
 )
 
 # 🔐 Secure token (Railway ENV)
-BOT_TOKEN = os.getenv("8572199840:AAFfrEL95uHnOJzbBmIIv89VV09BwxjYpgI")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 COINS = {
     "btc": "BTCUSDT",
