@@ -75,7 +75,6 @@ Market Type  : Spot
 Status       : Active
 Update       : Real-time
 
-CurrentRate By @Builtc
 """.strip()
 
 
