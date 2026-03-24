@@ -1,5 +1,6 @@
 import requests
 import uuid
+import os
 from telegram import Update, InlineQueryResultPhoto
 from telegram.ext import (
     ApplicationBuilder,
@@ -8,7 +9,8 @@ from telegram.ext import (
     InlineQueryHandler
 )
 
-BOT_TOKEN = "8572199840:AAFfrEL95uHnOJzbBmIIv89VV09BwxjYpgI"
+# 🔐 Secure token (Railway ENV)
+BOT_TOKEN = os.getenv("8572199840:AAFfrEL95uHnOJzbBmIIv89VV09BwxjYpgI")
 
 COINS = {
     "btc": "BTCUSDT",
@@ -45,7 +47,7 @@ def get_price(symbol):
 # ------------------ FORMAT ------------------ #
 def format_price(symbol, price, change):
     coin = symbol[:-4]
-    arrow = "📈" if change >= 0 else "📉"
+    arrow = "▲" if change >= 0 else "▼"
 
     return f"""
 <b>{coin} / USD</b>
@@ -57,13 +59,13 @@ Market Type  : Spot
 Status       : Active
 Update       : Real-time
 
-CurrentRate By @Builtc
+CurrentRate Terminal
 """.strip()
 
 
 def format_inline(symbol, price, change):
     coin = symbol[:-4]
-    arrow = "📈" if change >= 0 else "📉"
+    arrow = "▲" if change >= 0 else "▼"
 
     return f"""
 <b>{coin} / USD</b>
@@ -74,7 +76,6 @@ Exchange     : Binance
 Market Type  : Spot
 Status       : Active
 Update       : Real-time
-
 """.strip()
 
 
@@ -83,8 +84,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     caption = (
         "<b>CurrentRate Terminal</b>\n\n"
         "Real-time digital asset pricing interface.\n\n"
-        "Use /btc, /eth, /sol etc.\n"
-        "Or use inline: @Crntratebot btc"
+        "Use commands:\n"
+        "/btc /eth /sol /bnb /xrp /ton /usdt\n\n"
+        "Inline usage:\n"
+        "@yourbotusername btc"
     )
 
     banner = "https://i.ibb.co/ymc6BrQC/image.png"
@@ -96,7 +99,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-# ------------------ COMMAND HANDLER ------------------ #
+# ------------------ COMMAND ------------------ #
 async def coin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     command = update.message.text.replace("/", "").lower()
 
@@ -120,7 +123,7 @@ async def coin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Invalid asset command.")
 
 
-# ------------------ INLINE MODE (IMAGE + CAPTION) ------------------ #
+# ------------------ INLINE ------------------ #
 async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.inline_query.query.lower().strip()
     results = []
@@ -131,9 +134,6 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return None
 
         image = IMAGES.get(symbol_key)
-        if not image:
-            return None
-
         message = format_inline(symbol, price, change)
 
         return InlineQueryResultPhoto(
@@ -144,14 +144,11 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML"
         )
 
-    # Single coin
     if query in COINS:
         result = build_result(query, COINS[query])
         if result:
             results.append(result)
-
     else:
-        # Show all coins
         for key, symbol in COINS.items():
             result = build_result(key, symbol)
             if result:
@@ -161,14 +158,18 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ------------------ MAIN ------------------ #
-app = ApplicationBuilder().token(BOT_TOKEN).build()
+if __name__ == "__main__":
+    if not BOT_TOKEN:
+        raise ValueError("BOT_TOKEN not set in environment variables")
 
-app.add_handler(CommandHandler("start", start))
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-for coin in COINS.keys():
-    app.add_handler(CommandHandler(coin, coin_command))
+    app.add_handler(CommandHandler("start", start))
 
-app.add_handler(InlineQueryHandler(inline_query))
+    for coin in COINS.keys():
+        app.add_handler(CommandHandler(coin, coin_command))
 
-print("🚀 Bot running (IMAGE + INLINE READY)...")
-app.run_polling()
+    app.add_handler(InlineQueryHandler(inline_query))
+
+    print("Bot running on Railway...")
+    app.run_polling()
