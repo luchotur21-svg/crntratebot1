@@ -34,18 +34,17 @@ IMAGES = {
 
 # ------------------ CACHE ------------------ #
 CACHE = {}
-CACHE_TIME = 10  # seconds
+CACHE_TIME = 10
 
 def get_cached(symbol):
     if symbol in CACHE:
-        price, change, timestamp = CACHE[symbol]
-        if time.time() - timestamp < CACHE_TIME:
+        price, change, t = CACHE[symbol]
+        if time.time() - t < CACHE_TIME:
             return price, change
     return None, None
 
 def set_cache(symbol, price, change):
     CACHE[symbol] = (price, change, time.time())
-
 
 # ------------------ COINGECKO ------------------ #
 def fetch_coingecko(coin_id):
@@ -69,8 +68,7 @@ def fetch_coingecko(coin_id):
     except:
         return None, None
 
-
-# ------------------ BINANCE FALLBACK ------------------ #
+# ------------------ BINANCE ------------------ #
 def fetch_binance(symbol):
     url = f"https://api.binance.com/api/v3/ticker/24hr?symbol={symbol}"
 
@@ -80,20 +78,16 @@ def fetch_binance(symbol):
     except:
         return None, None
 
-
 # ------------------ MAIN PRICE ------------------ #
 def get_price(key):
     coin_id, symbol = COINS[key]
 
-    # Cache check
     price, change = get_cached(key)
     if price is not None:
         return price, change
 
-    # Try CoinGecko
     price, change = fetch_coingecko(coin_id)
 
-    # Fallback to Binance
     if price is None:
         price, change = fetch_binance(symbol)
 
@@ -101,7 +95,6 @@ def get_price(key):
         set_cache(key, price, change)
 
     return price, change
-
 
 # ------------------ FORMAT ------------------ #
 def format_price(coin, price, change):
@@ -112,13 +105,14 @@ def format_price(coin, price, change):
 
 Price        : ${price:,.4f}
 Change       : {arrow} {change:.2f}%
+Source       : Multi-API
 Market       : Spot
 
 Status       : Active
 Update       : Real-time
 
+CurrentRate Terminal
 """.strip()
-
 
 # ------------------ START ------------------ #
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -131,11 +125,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "/btc /eth /sol /bnb /xrp /ton /usdt\n"
             "/convert 10 btc\n\n"
             "Inline:\n"
-            "@yourbotusername btc"
+            "@yourbotusername btc\n"
+            "@yourbotusername 10 btc"
         ),
         parse_mode="HTML"
     )
-
 
 # ------------------ COMMAND ------------------ #
 async def coin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -156,7 +150,6 @@ async def coin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         caption=format_price(cmd, price, change),
         parse_mode="HTML"
     )
-
 
 # ------------------ CONVERT ------------------ #
 async def convert(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -199,12 +192,54 @@ CurrentRate Terminal
     except:
         await update.message.reply_text("Usage: /convert 10 btc")
 
-
 # ------------------ INLINE ------------------ #
 async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.inline_query.query.lower().strip()
     results = []
 
+    parts = query.split()
+
+    # 🔥 INLINE CONVERT (10 btc)
+    if len(parts) == 2:
+        try:
+            amount = float(parts[0])
+            coin = parts[1]
+
+            if coin in COINS:
+                price, _ = get_price(coin)
+
+                if price:
+                    total = amount * price
+
+                    caption = f"""
+<b>{amount} {coin.upper()}</b>
+
+Value        : ${total:,.2f}
+Rate         : ${price:,.4f}
+
+Conversion   : {coin.upper()} → USD
+Source       : Multi-API
+
+CurrentRate Terminal
+""".strip()
+
+                    results.append(
+                        InlineQueryResultPhoto(
+                            id=str(uuid.uuid4()),
+                            photo_url=IMAGES.get(coin),
+                            thumbnail_url=IMAGES.get(coin),
+                            caption=caption,
+                            parse_mode="HTML"
+                        )
+                    )
+
+                    await update.inline_query.answer(results, cache_time=1)
+                    return
+
+        except:
+            pass
+
+    # 🔥 NORMAL PRICE INLINE
     for coin in COINS.keys():
         if query and coin not in query:
             continue
@@ -225,7 +260,6 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.inline_query.answer(results, cache_time=1)
 
-
 # ------------------ MAIN ------------------ #
 if __name__ == "__main__":
     if not BOT_TOKEN:
@@ -241,5 +275,5 @@ if __name__ == "__main__":
 
     app.add_handler(InlineQueryHandler(inline_query))
 
-    print("Bot running (PRO VERSION)...")
+    print("Bot running (ULTIMATE VERSION)...")
     app.run_polling()
