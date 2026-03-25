@@ -1,4 +1,4 @@
-import requests
+ import requests
 import uuid
 import os
 from telegram import Update, InlineQueryResultPhoto
@@ -9,17 +9,16 @@ from telegram.ext import (
     InlineQueryHandler
 )
 
-# 🔐 Secure token (Railway ENV)
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 COINS = {
-    "btc": "BTCUSDT",
-    "eth": "ETHUSDT",
-    "sol": "SOLUSDT",
-    "bnb": "BNBUSDT",
-    "xrp": "XRPUSDT",
-    "ton": "TONUSDT",
-    "usdt": "USDTUSDT"
+    "btc": "bitcoin",
+    "eth": "ethereum",
+    "sol": "solana",
+    "bnb": "binancecoin",
+    "xrp": "ripple",
+    "ton": "the-open-network",
+    "usdt": "tether"
 }
 
 IMAGES = {
@@ -33,29 +32,27 @@ IMAGES = {
 }
 
 # ------------------ PRICE FETCH ------------------ #
-def get_price(symbol):
-    url = f"https://api.binance.com/api/v3/ticker/24hr?symbol={symbol}"
+def get_price(coin_id):
+    url = f"https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids={coin_id}"
     try:
-        res = requests.get(url, timeout=5).json()
-        price = float(res["lastPrice"])
-        change = float(res["priceChangePercent"])
-        return price, change
+        data = requests.get(url, timeout=5).json()[0]
+        return data["current_price"], data["price_change_percentage_24h"]
     except:
         return None, None
 
 
 # ------------------ FORMAT ------------------ #
-def format_price(symbol, price, change):
-    coin = symbol[:-4]
+def format_price(coin, price, change):
     arrow = "▲" if change >= 0 else "▼"
 
     return f"""
-<b>{coin} / USD</b>
+<b>{coin.upper()} / USD</b>
 
 Price        : ${price:,.4f}
 Change       : {arrow} {change:.2f}%
-Exchange     : Binance
-Market Type  : Spot
+Source       : CoinGecko
+Market       : Spot
+
 Status       : Active
 Update       : Real-time
 
@@ -63,59 +60,41 @@ CurrentRate Terminal
 """.strip()
 
 
-def format_inline(symbol, price, change):
-    coin = symbol[:-4]
-    arrow = "▲" if change >= 0 else "▼"
-
-    return f"""
-<b>{coin} / USD</b>
-
-Price        : ${price:,.4f}
-Change       : {arrow} {change:.2f}%
-Exchange     : Binance
-Market Type  : Spot
-Status       : Active
-Update       : Real-time
-""".strip()
-
-
 # ------------------ START ------------------ #
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     caption = (
         "<b>CurrentRate Terminal</b>\n\n"
-        "Real-time digital asset pricing interface.\n\n"
-        "Use commands:\n"
-        "/btc /eth /sol /bnb /xrp /ton /usdt\n\n"
-        "Inline usage:\n"
+        "Live crypto pricing & conversion system.\n\n"
+        "Commands:\n"
+        "/btc /eth /sol /bnb /xrp /ton /usdt\n"
+        "/convert 10 btc\n\n"
+        "Inline:\n"
         "@yourbotusername btc"
     )
 
-    banner = "https://i.ibb.co/ymc6BrQC/image.png"
-
     await update.message.reply_photo(
-        photo=banner,
+        photo="https://i.ibb.co/ymc6BrQC/image.png",
         caption=caption,
         parse_mode="HTML"
     )
 
 
-# ------------------ COMMAND ------------------ #
+# ------------------ PRICE COMMAND ------------------ #
 async def coin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     command = update.message.text.replace("/", "").lower()
 
     if command in COINS:
-        symbol = COINS[command]
-        price, change = get_price(symbol)
+        coin_id = COINS[command]
+        price, change = get_price(coin_id)
 
         if price is None:
             await update.message.reply_text("Unable to retrieve market data.")
             return
 
-        caption = format_price(symbol, price, change)
-        image = IMAGES.get(command)
+        caption = format_price(command, price, change)
 
         await update.message.reply_photo(
-            photo=image,
+            photo=IMAGES.get(command),
             caption=caption,
             parse_mode="HTML"
         )
@@ -123,36 +102,78 @@ async def coin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Invalid asset command.")
 
 
+# ------------------ CONVERT COMMAND ------------------ #
+async def convert(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if len(context.args) != 2:
+        await update.message.reply_text(
+            "Usage: /convert <amount> <coin>\nExample: /convert 10 btc"
+        )
+        return
+
+    try:
+        amount = float(context.args[0])
+        coin = context.args[1].lower()
+
+        if coin not in COINS:
+            await update.message.reply_text("Invalid coin symbol.")
+            return
+
+        price, _ = get_price(COINS[coin])
+
+        if price is None:
+            await update.message.reply_text("Unable to retrieve market data.")
+            return
+
+        total = amount * price
+
+        caption = f"""
+<b>{amount} {coin.upper()}</b>
+
+Value        : ${total:,.2f}
+Rate         : ${price:,.4f}
+
+Conversion   : {coin.upper()} → USD
+Source       : CoinGecko
+
+CurrentRate Terminal
+""".strip()
+
+        await update.message.reply_photo(
+            photo=IMAGES.get(coin),
+            caption=caption,
+            parse_mode="HTML"
+        )
+
+    except ValueError:
+        await update.message.reply_text(
+            "Invalid number. Example: /convert 10 btc"
+        )
+
+
 # ------------------ INLINE ------------------ #
 async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.inline_query.query.lower().strip()
     results = []
 
-    def build_result(symbol_key, symbol):
-        price, change = get_price(symbol)
+    for coin, coin_id in COINS.items():
+        if query and coin not in query:
+            continue
+
+        price, change = get_price(coin_id)
         if price is None:
-            return None
+            continue
 
-        image = IMAGES.get(symbol_key)
-        message = format_inline(symbol, price, change)
+        message = format_price(coin, price, change)
 
-        return InlineQueryResultPhoto(
-            id=str(uuid.uuid4()),
-            photo_url=image,
-            thumbnail_url=image,
-            caption=message,
-            parse_mode="HTML"
+        results.append(
+            InlineQueryResultPhoto(
+                id=str(uuid.uuid4()),
+                photo_url=IMAGES.get(coin),
+                thumbnail_url=IMAGES.get(coin),
+                caption=message,
+                parse_mode="HTML"
+            )
         )
-
-    if query in COINS:
-        result = build_result(query, COINS[query])
-        if result:
-            results.append(result)
-    else:
-        for key, symbol in COINS.items():
-            result = build_result(key, symbol)
-            if result:
-                results.append(result)
 
     await update.inline_query.answer(results, cache_time=1)
 
@@ -165,11 +186,12 @@ if __name__ == "__main__":
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("convert", convert))
 
     for coin in COINS.keys():
         app.add_handler(CommandHandler(coin, coin_command))
 
     app.add_handler(InlineQueryHandler(inline_query))
 
-    print("Bot running on Railway...")
+    print("Bot running (FINAL VERSION)...")
     app.run_polling()
