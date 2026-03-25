@@ -1,4 +1,4 @@
- import requests
+import requests
 import uuid
 import os
 from telegram import Update, InlineQueryResultPhoto
