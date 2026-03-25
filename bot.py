@@ -112,13 +112,11 @@ def format_price(coin, price, change):
 
 Price        : ${price:,.4f}
 Change       : {arrow} {change:.2f}%
-Source       : Multi-API
 Market       : Spot
 
 Status       : Active
 Update       : Real-time
 
-CurrentRate Terminal
 """.strip()
 
 
