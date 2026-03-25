@@ -31,13 +31,33 @@ IMAGES = {
     "xrp": "https://i.ibb.co/M5BMh071/image.png"
 }
 
-# ------------------ PRICE FETCH ------------------ #
+# ------------------ PRICE FETCH (FIXED) ------------------ #
 def get_price(coin_id):
     url = f"https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids={coin_id}"
+
+    headers = {
+        "User-Agent": "Mozilla/5.0"
+    }
+
     try:
-        data = requests.get(url, timeout=5).json()[0]
-        return data["current_price"], data["price_change_percentage_24h"]
-    except:
+        response = requests.get(url, headers=headers, timeout=10)
+
+        if response.status_code != 200:
+            print("API STATUS ERROR:", response.status_code)
+            return None, None
+
+        data = response.json()
+
+        if not data:
+            print("EMPTY DATA:", data)
+            return None, None
+
+        coin = data[0]
+
+        return coin["current_price"], coin["price_change_percentage_24h"]
+
+    except Exception as e:
+        print("API ERROR:", e)
         return None, None
 
 
@@ -193,5 +213,5 @@ if __name__ == "__main__":
 
     app.add_handler(InlineQueryHandler(inline_query))
 
-    print("Bot running (FINAL VERSION)...")
+    print("Bot running (FINAL FIXED VERSION)...")
     app.run_polling()
