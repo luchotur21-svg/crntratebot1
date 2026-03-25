@@ -1,6 +1,7 @@
 import requests
 import uuid
 import os
+import time
 from telegram import Update, InlineQueryResultPhoto
 from telegram.ext import (
     ApplicationBuilder,
@@ -12,13 +13,13 @@ from telegram.ext import (
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 COINS = {
-    "btc": "bitcoin",
-    "eth": "ethereum",
-    "sol": "solana",
-    "bnb": "binancecoin",
-    "xrp": "ripple",
-    "ton": "the-open-network",
-    "usdt": "tether"
+    "btc": ("bitcoin", "BTCUSDT"),
+    "eth": ("ethereum", "ETHUSDT"),
+    "sol": ("solana", "SOLUSDT"),
+    "bnb": ("binancecoin", "BNBUSDT"),
+    "xrp": ("ripple", "XRPUSDT"),
+    "ton": ("the-open-network", "TONUSDT"),
+    "usdt": ("tether", "USDTUSDT")
 }
 
 IMAGES = {
@@ -31,34 +32,75 @@ IMAGES = {
     "xrp": "https://i.ibb.co/M5BMh071/image.png"
 }
 
-# ------------------ PRICE FETCH (FIXED) ------------------ #
-def get_price(coin_id):
-    url = f"https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids={coin_id}"
+# ------------------ CACHE ------------------ #
+CACHE = {}
+CACHE_TIME = 10  # seconds
 
-    headers = {
-        "User-Agent": "Mozilla/5.0"
-    }
+def get_cached(symbol):
+    if symbol in CACHE:
+        price, change, timestamp = CACHE[symbol]
+        if time.time() - timestamp < CACHE_TIME:
+            return price, change
+    return None, None
+
+def set_cache(symbol, price, change):
+    CACHE[symbol] = (price, change, time.time())
+
+
+# ------------------ COINGECKO ------------------ #
+def fetch_coingecko(coin_id):
+    url = f"https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids={coin_id}"
+    headers = {"User-Agent": "Mozilla/5.0"}
 
     try:
-        response = requests.get(url, headers=headers, timeout=10)
+        res = requests.get(url, headers=headers, timeout=10)
 
-        if response.status_code != 200:
-            print("API STATUS ERROR:", response.status_code)
+        if res.status_code == 429:
+            time.sleep(2)
             return None, None
 
-        data = response.json()
-
+        data = res.json()
         if not data:
-            print("EMPTY DATA:", data)
             return None, None
 
         coin = data[0]
-
         return coin["current_price"], coin["price_change_percentage_24h"]
 
-    except Exception as e:
-        print("API ERROR:", e)
+    except:
         return None, None
+
+
+# ------------------ BINANCE FALLBACK ------------------ #
+def fetch_binance(symbol):
+    url = f"https://api.binance.com/api/v3/ticker/24hr?symbol={symbol}"
+
+    try:
+        res = requests.get(url, timeout=5).json()
+        return float(res["lastPrice"]), float(res["priceChangePercent"])
+    except:
+        return None, None
+
+
+# ------------------ MAIN PRICE ------------------ #
+def get_price(key):
+    coin_id, symbol = COINS[key]
+
+    # Cache check
+    price, change = get_cached(key)
+    if price is not None:
+        return price, change
+
+    # Try CoinGecko
+    price, change = fetch_coingecko(coin_id)
+
+    # Fallback to Binance
+    if price is None:
+        price, change = fetch_binance(symbol)
+
+    if price is not None:
+        set_cache(key, price, change)
+
+    return price, change
 
 
 # ------------------ FORMAT ------------------ #
@@ -70,7 +112,7 @@ def format_price(coin, price, change):
 
 Price        : ${price:,.4f}
 Change       : {arrow} {change:.2f}%
-Source       : CoinGecko
+Source       : Multi-API
 Market       : Spot
 
 Status       : Active
@@ -82,52 +124,46 @@ CurrentRate Terminal
 
 # ------------------ START ------------------ #
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    caption = (
-        "<b>CurrentRate Terminal</b>\n\n"
-        "Live crypto pricing & conversion system.\n\n"
-        "Commands:\n"
-        "/btc /eth /sol /bnb /xrp /ton /usdt\n"
-        "/convert 10 btc\n\n"
-        "Inline:\n"
-        "@yourbotusername btc"
-    )
-
     await update.message.reply_photo(
         photo="https://i.ibb.co/ymc6BrQC/image.png",
-        caption=caption,
+        caption=(
+            "<b>CurrentRate Terminal</b>\n\n"
+            "Premium crypto pricing system.\n\n"
+            "Commands:\n"
+            "/btc /eth /sol /bnb /xrp /ton /usdt\n"
+            "/convert 10 btc\n\n"
+            "Inline:\n"
+            "@yourbotusername btc"
+        ),
         parse_mode="HTML"
     )
 
 
-# ------------------ PRICE COMMAND ------------------ #
+# ------------------ COMMAND ------------------ #
 async def coin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    command = update.message.text.replace("/", "").lower()
+    cmd = update.message.text.replace("/", "").lower()
 
-    if command in COINS:
-        coin_id = COINS[command]
-        price, change = get_price(coin_id)
-
-        if price is None:
-            await update.message.reply_text("Unable to retrieve market data.")
-            return
-
-        caption = format_price(command, price, change)
-
-        await update.message.reply_photo(
-            photo=IMAGES.get(command),
-            caption=caption,
-            parse_mode="HTML"
-        )
-    else:
+    if cmd not in COINS:
         await update.message.reply_text("Invalid asset command.")
+        return
+
+    price, change = get_price(cmd)
+
+    if price is None:
+        await update.message.reply_text("Unable to retrieve market data.")
+        return
+
+    await update.message.reply_photo(
+        photo=IMAGES.get(cmd),
+        caption=format_price(cmd, price, change),
+        parse_mode="HTML"
+    )
 
 
-# ------------------ CONVERT COMMAND ------------------ #
+# ------------------ CONVERT ------------------ #
 async def convert(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(context.args) != 2:
-        await update.message.reply_text(
-            "Usage: /convert <amount> <coin>\nExample: /convert 10 btc"
-        )
+        await update.message.reply_text("Usage: /convert 10 btc")
         return
 
     try:
@@ -135,10 +171,10 @@ async def convert(update: Update, context: ContextTypes.DEFAULT_TYPE):
         coin = context.args[1].lower()
 
         if coin not in COINS:
-            await update.message.reply_text("Invalid coin symbol.")
+            await update.message.reply_text("Invalid coin.")
             return
 
-        price, _ = get_price(COINS[coin])
+        price, _ = get_price(coin)
 
         if price is None:
             await update.message.reply_text("Unable to retrieve market data.")
@@ -146,28 +182,24 @@ async def convert(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         total = amount * price
 
-        caption = f"""
+        await update.message.reply_photo(
+            photo=IMAGES.get(coin),
+            caption=f"""
 <b>{amount} {coin.upper()}</b>
 
 Value        : ${total:,.2f}
 Rate         : ${price:,.4f}
 
 Conversion   : {coin.upper()} → USD
-Source       : CoinGecko
+Source       : Multi-API
 
 CurrentRate Terminal
-""".strip()
-
-        await update.message.reply_photo(
-            photo=IMAGES.get(coin),
-            caption=caption,
+""".strip(),
             parse_mode="HTML"
         )
 
-    except ValueError:
-        await update.message.reply_text(
-            "Invalid number. Example: /convert 10 btc"
-        )
+    except:
+        await update.message.reply_text("Usage: /convert 10 btc")
 
 
 # ------------------ INLINE ------------------ #
@@ -175,22 +207,20 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.inline_query.query.lower().strip()
     results = []
 
-    for coin, coin_id in COINS.items():
+    for coin in COINS.keys():
         if query and coin not in query:
             continue
 
-        price, change = get_price(coin_id)
+        price, change = get_price(coin)
         if price is None:
             continue
-
-        message = format_price(coin, price, change)
 
         results.append(
             InlineQueryResultPhoto(
                 id=str(uuid.uuid4()),
                 photo_url=IMAGES.get(coin),
                 thumbnail_url=IMAGES.get(coin),
-                caption=message,
+                caption=format_price(coin, price, change),
                 parse_mode="HTML"
             )
         )
@@ -213,5 +243,5 @@ if __name__ == "__main__":
 
     app.add_handler(InlineQueryHandler(inline_query))
 
-    print("Bot running (FINAL FIXED VERSION)...")
+    print("Bot running (PRO VERSION)...")
     app.run_polling()
