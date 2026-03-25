@@ -160,7 +160,7 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ------------------ MAIN ------------------ #
 if __name__ == "__main__":
     if not BOT_TOKEN:
-        raise ValueError("BOT_TOKEN not set in environment variables")
+        raise ValueError("BOT_TOKEN")
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
